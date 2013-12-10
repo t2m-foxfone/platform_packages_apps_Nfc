@@ -1002,13 +1002,22 @@ static void nfcManager_enableDiscovery (JNIEnv* e, jobject o)
 *******************************************************************************/
 void nfcManager_disableDiscovery (JNIEnv*, jobject)
 {
+    UINT32 nfc_screen_off_polling_on = 0;
     tNFA_STATUS status = NFA_STATUS_OK;
+    UINT8            cmd_params_len = 0;
+    UINT8            *p_cmd_params = NULL;
+    UINT8            oid = 0x3;
     ALOGD ("%s: enter;", __FUNCTION__);
-
+    GetNumValue("NFC_SCREEN_OFF_POLL_ON", &nfc_screen_off_polling_on, sizeof(nfc_screen_off_polling_on));
+    if(nfc_screen_off_polling_on == 0x01)
+    {
+        goto TheEnd;
+    }
     pn544InteropAbortNow ();
     if (sDiscoveryEnabled == false)
     {
         ALOGD ("%s: already disabled", __FUNCTION__);
+        NFA_SendVsCommand(oid, cmd_params_len, p_cmd_params, NULL);
         goto TheEnd;
     }
 
@@ -1875,6 +1884,23 @@ static void nfcManager_doDisableReaderMode (JNIEnv* e, jobject o)
 }
 
 
+/********************************************************************************************************
+**
+** Function:        nfcManager_doReportReason
+**
+** Description:     Gets reason of Shutdown from Java layer(Shutdown due to NFC disabled by User or not)
+**                  e: JVM environment.
+**                  o: Java object.
+**                  shutdownReason: if 1 - NFC disabled by User otherwise 0.
+**
+** Returns:         None.
+**
+******************************************************************************************************/
+static void nfcManager_doReportReason(JNIEnv *e, jobject o, jint shutdownReason)
+{
+    ALOGD ("%s: shutdownReason=%d", __FUNCTION__, shutdownReason);
+    NFA_StoreShutdownReason (shutdownReason);
+}
 /*****************************************************************************
 **
 ** JNI functions for android-4.0.1_r1
@@ -1968,6 +1994,8 @@ static JNINativeMethod gMethods[] =
 
     {"doDump", "()Ljava/lang/String;",
             (void *)nfcManager_doDump},
+    {"doReportReason", "(I)V",
+            (void *)nfcManager_doReportReason},
 };
 
 
