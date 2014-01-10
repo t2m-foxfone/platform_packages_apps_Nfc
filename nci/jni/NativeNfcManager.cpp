@@ -15,6 +15,7 @@
  */
 
 #include <semaphore.h>
+#include <unistd.h>
 #include <errno.h>
 #include "OverrideLog.h"
 #include "NfcJniUtil.h"
@@ -41,7 +42,7 @@ extern "C"
     #include "nfc_brcm_defs.h"
     #include "ce_api.h"
 }
-
+#define NFCSERVICE_WATCHDOG_TIMER_EXPIRED 4
 extern UINT8 *p_nfa_dm_start_up_cfg;
 extern const UINT8 nfca_version_string [];
 extern const UINT8 nfa_version_string [];
@@ -152,7 +153,7 @@ static UINT16 sCurrentConfigLen;
 static UINT8 sConfig[256];
 static UINT8 sLongGuardTime[] = { 0x00, 0x20 };
 static UINT8 sDefaultGuardTime[] = { 0x00, 0x11 };
-
+bool sIsDeviceReset = false;
 /////////////////////////////////////////////////////////////
 /////////////////////////////////////////////////////////////
 
@@ -552,6 +553,8 @@ static jboolean nfcManager_initNativeStruc (JNIEnv* e, jobject o)
         return JNI_FALSE;
     }
 
+    // Set sIsDeviceReset to tru to indicate in further calls that it is device reset.
+    sIsDeviceReset = true;
     memset (nat, 0, sizeof(*nat));
     e->GetJavaVM(&(nat->vm));
     nat->env_version = e->GetVersion();
@@ -852,6 +855,8 @@ static jboolean nfcManager_doInitialize (JNIEnv* e, jobject o)
 
             NFA_Init (halFuncEntries);
 
+            NFA_CheckDeviceResetStatus(sIsDeviceReset);
+            sIsDeviceReset = false;
             stat = NFA_Enable (nfaDeviceManagementCallback, nfaConnectionCallback);
             if (stat == NFA_STATUS_OK)
             {
@@ -1682,6 +1687,9 @@ static jboolean nfcManager_doActivateLlcp(JNIEnv*, jobject)
 static void nfcManager_doAbort(JNIEnv*, jobject)
 {
     ALOGE("%s: abort()", __FUNCTION__);
+    /*Watchdog expired .nfcservice being aborted.Inform ncihal*/
+    NFA_StoreShutdownReason(NFCSERVICE_WATCHDOG_TIMER_EXPIRED);
+    usleep(100);
     abort();
 }
 
