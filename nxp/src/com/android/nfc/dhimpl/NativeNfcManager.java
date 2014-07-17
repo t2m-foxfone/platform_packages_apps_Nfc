@@ -180,12 +180,6 @@ public class NativeNfcManager implements DeviceHost {
     }
 
     @Override
-    public boolean unrouteAid(byte[] aid)
-    {
-       return false;
-    }
-
-    @Override
     public native void enableDiscovery();
 
     @Override
@@ -457,7 +451,5 @@ public class NativeNfcManager implements DeviceHost {
     private void notifySeMifareAccess(byte[] block) {
         mListener.onSeMifareAccess(block);
     }
-
-    public void nfcShutdownReason(int reason){}
 
 }

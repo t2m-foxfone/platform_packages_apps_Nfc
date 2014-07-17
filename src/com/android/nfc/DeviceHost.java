@@ -13,7 +13,25 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
+/******************************************************************************
+ *
+ *  The original Work has been changed by NXP Semiconductors.
+ *
+ *  Copyright (C) 2013-2014 NXP Semiconductors
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ *
+ ******************************************************************************/
 package com.android.nfc;
 
 import android.nfc.NdefMessage;
@@ -33,13 +51,25 @@ public interface DeviceHost {
         /**
          * Notifies transaction
          */
-        public void onCardEmulationAidSelected(byte[] aid);
+        public void onCardEmulationAidSelected(byte[] aid,byte[] data, int evtSrc);
+
+        /**
+         * Notifies connectivity event from the SE
+         */
+        public void onConnectivityEvent(int evtSrc);
+
+        /**
+         * Notifies about multiple card presented to
+         * emvco reader.
+         */
+        public void onEmvcoMultiCardDetectedEvent();
 
         /**
          */
         public void onHostCardEmulationActivated();
         public void onHostCardEmulationData(byte[] data);
         public void onHostCardEmulationDeactivated();
+        public void onAidRoutingTableFull();
 
         /**
          * Notifies P2P Device detected, to activate LLCP link
@@ -72,6 +102,14 @@ public interface DeviceHost {
         public void onSeEmvCardRemoval();
 
         public void onSeMifareAccess(byte[] block);
+        /**
+         * Notifies SWP Reader Events.
+         */
+        public void onSWPReaderRequestedEvent(boolean istechA, boolean istechB);
+
+        public void onSWPReaderActivatedEvent();
+
+        public void onSWPReaderDeActivatedEvent();
     }
 
     public interface TagEndpoint {
@@ -189,13 +227,19 @@ public interface DeviceHost {
      */
     public void checkFirmware();
 
+    public boolean download();
+
     public boolean initialize();
+
+    public int GetDefaultSE();
 
     public boolean deinitialize();
 
     public String getName();
 
     public void enableDiscovery();
+
+    public void doSetScreenState(int mScreenState);
 
     public void disableDiscovery();
 
@@ -205,15 +249,33 @@ public interface DeviceHost {
 
     public int[] doGetSecureElementList();
 
-    public void doSelectSecureElement();
+    public void doSelectSecureElement(int seID);
+    public void doSetSecureElementListenTechMask(int tech_mask);
+    public int doGetSecureElementTechList();
+    public void doDeselectSecureElement(int seID);
 
-    public void doDeselectSecureElement();
+    public void doSetSEPowerOffState(int seID,boolean enable);
+
+    public void setDefaultTechRoute(int seID, int tech_switchon, int tech_switchoff);
+
+    public void setDefaultProtoRoute(int seID, int proto_switchon, int proto_switchoff);
+
 
     public boolean sendRawFrame(byte[] data);
 
-    public boolean routeAid(byte[] aid, int route);
+    public boolean routeAid(byte[] aid, int route, int powerState);
+    public boolean setDefaultRoute(int defaultRouteEntry, int defaultProtoRouteEntry, int defaultTechRouteEntry);
+    public void clearRouting();
 
-    public boolean unrouteAid(byte[] aid);
+    public int setEmvCoPollProfile(boolean enable, int route);
+    public int getAidTableSize();
+
+    public int getDefaultAidRoute();
+
+    public int getDefaultDesfireRoute();
+
+    public int  getDefaultMifareCLTRoute();
+
 
     public LlcpConnectionlessSocket createLlcpConnectionlessSocket(int nSap, String sn)
             throws LlcpException;
@@ -254,10 +316,30 @@ public interface DeviceHost {
 
     int getDefaultLlcpRwSize();
 
+    int getChipVer();
+
+    int JCOSDownload();
+
+    void doSetVenConfigValue(int VenConfig);
+
     String dump();
 
     boolean enableReaderMode(int technologies);
 
     boolean disableReaderMode();
-    public void nfcShutdownReason(int reason);
+
+    boolean SetScrnState(int Enable);
+
+    //Factory Test --start
+    public void doPrbsOn(int tech, int rate);
+
+    public void doPrbsOff();
+
+    public int SWPSelfTest(int ch);
+
+    public int getFWVersion();
+
+    public void doSetEEPROM(byte[] val);
+    //Factory Test --end
+
 }

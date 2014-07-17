@@ -13,7 +13,25 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
+/******************************************************************************
+ *
+ *  The original Work has been changed by NXP Semiconductors.
+ *
+ *  Copyright (C) 2013-2014 NXP Semiconductors
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License");
+ *  you may not use this file except in compliance with the License.
+ *  You may obtain a copy of the License at
+ *
+ *  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software
+ *  distributed under the License is distributed on an "AS IS" BASIS,
+ *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ *  See the License for the specific language governing permissions and
+ *  limitations under the License.
+ *
+ ******************************************************************************/
 package com.android.nfc.dhimpl;
 
 import android.annotation.SdkConstant;
@@ -25,6 +43,8 @@ import android.nfc.tech.Ndef;
 import android.nfc.tech.TagTechnology;
 import android.util.Log;
 
+import java.io.File;
+
 import com.android.nfc.DeviceHost;
 import com.android.nfc.LlcpException;
 
@@ -33,6 +53,9 @@ import com.android.nfc.LlcpException;
  */
 public class NativeNfcManager implements DeviceHost {
     private static final String TAG = "NativeNfcManager";
+    private static final String NFC_CONTROLLER_FIRMWARE_FILE_NAME = "/vendor/firmware/libpn547_fw.so";
+    private static final String PREF_FIRMWARE_MODTIME = "firmware_modtime";
+    private static final long FIRMWARE_MODTIME_DEFAULT = -1;
     static final String PREF = "NciDeviceHost";
 
     static final int DEFAULT_LLCP_MIU = 1980;
@@ -40,17 +63,7 @@ public class NativeNfcManager implements DeviceHost {
 
     static final String DRIVER_NAME = "android-nci";
 
-    private static final byte[][] EE_WIPE_APDUS = {
-        {(byte)0x00, (byte)0xa4, (byte)0x04, (byte)0x00, (byte)0x00},
-        {(byte)0x00, (byte)0xa4, (byte)0x04, (byte)0x00, (byte)0x07, (byte)0xa0, (byte)0x00,
-                (byte)0x00, (byte)0x04, (byte)0x76, (byte)0x20, (byte)0x10, (byte)0x00},
-        {(byte)0x80, (byte)0xe2, (byte)0x01, (byte)0x03, (byte)0x00},
-        {(byte)0x00, (byte)0xa4, (byte)0x04, (byte)0x00, (byte)0x00},
-        {(byte)0x00, (byte)0xa4, (byte)0x04, (byte)0x00, (byte)0x07, (byte)0xa0, (byte)0x00,
-                (byte)0x00, (byte)0x04, (byte)0x76, (byte)0x30, (byte)0x30, (byte)0x00},
-        {(byte)0x80, (byte)0xb4, (byte)0x00, (byte)0x00, (byte)0x00},
-        {(byte)0x00, (byte)0xa4, (byte)0x04, (byte)0x00, (byte)0x00},
-    };
+    private static final byte[][] EE_WIPE_APDUS = {};
 
     static {
         System.loadLibrary("nfc_nci_jni");
@@ -75,11 +88,52 @@ public class NativeNfcManager implements DeviceHost {
 
     private native boolean doDownload();
 
+    @Override
+    public boolean download() {
+        return doDownload();
+    }
+
     public native int doGetLastError();
 
     @Override
     public void checkFirmware() {
-        doDownload();
+        // Check that the NFC controller firmware is up to date.  This
+        // ensures that firmware updates are applied in a timely fashion,
+        // and makes it much less likely that the user will have to wait
+        // for a firmware download when they enable NFC in the settings
+        // app.  Firmware download can take some time, so this should be
+        // run in a separate thread.
+
+        // check the timestamp of the firmware file
+        File firmwareFile;
+        int nbRetry = 0;
+        try {
+            firmwareFile = new File(NFC_CONTROLLER_FIRMWARE_FILE_NAME);
+        } catch(NullPointerException npe) {
+            Log.e(TAG,"path to firmware file was null");
+            return;
+        }
+
+        long modtime = firmwareFile.lastModified();
+
+        SharedPreferences prefs = mContext.getSharedPreferences(PREF, Context.MODE_PRIVATE);
+        long prev_fw_modtime = prefs.getLong(PREF_FIRMWARE_MODTIME, FIRMWARE_MODTIME_DEFAULT);
+        Log.d(TAG,"prev modtime: " + prev_fw_modtime);
+        Log.d(TAG,"new modtime: " + modtime);
+        if (prev_fw_modtime == modtime) {
+            return;
+        }
+
+        // FW download.
+        Log.d(TAG,"Perform Download");
+        if(doDownload()) {
+            Log.d(TAG,"Download Success");
+            // Now that we've finished updating the firmware, save the new modtime.
+            prefs.edit().putLong(PREF_FIRMWARE_MODTIME, modtime).apply();
+        }
+     else {
+            Log.d(TAG,"Download Failed");
+        }
     }
 
     private native boolean doInitialize();
@@ -100,11 +154,6 @@ public class NativeNfcManager implements DeviceHost {
         return doInitialize();
     }
 
-    private native void doReportReason(int reason);
-    @Override
-    public void nfcShutdownReason(int reason) {
-          doReportReason(reason);
-    }
     private native boolean doDeinitialize();
 
     @Override
@@ -118,6 +167,13 @@ public class NativeNfcManager implements DeviceHost {
         return doDeinitialize();
     }
 
+    private native void doSetScrnState(int Enable);
+    @Override
+    public boolean SetScrnState(int Enable) {
+                 doSetScrnState(Enable);
+                 return true;
+    }
+
     @Override
     public String getName() {
         return DRIVER_NAME;
@@ -127,10 +183,42 @@ public class NativeNfcManager implements DeviceHost {
     public native boolean sendRawFrame(byte[] data);
 
     @Override
-    public native boolean routeAid(byte[] aid, int route);
+    public boolean routeAid(byte[] aid, int route, int powerState) {
+
+        boolean status = true;
+        //if(mIsAidFilterSupported) {
+            //Prepare a cache of AIDs, and only send when vzwSetFilterList is called.
+          //  mAidFilter.addAppAidToCache(aid, route, powerState);
+        //} else {
+            status = doRouteAid(aid, route, powerState);
+        //}
+
+        return status;
+    }
+
+    public native boolean doRouteAid(byte[] aid, int route, int powerState);
+    @Override
+    public native boolean setDefaultRoute(int defaultRouteEntry, int defaultProtoRouteEntry, int defaultTechRouteEntry);
 
     @Override
-    public native boolean unrouteAid(byte[] aid);
+    public native void clearRouting();
+
+    @Override
+    public native void doSetSecureElementListenTechMask(int tech_mask);
+    @Override
+    public native int getAidTableSize();
+
+    @Override
+    public native int   getDefaultAidRoute();
+
+    @Override
+    public native int   getDefaultDesfireRoute();
+
+    @Override
+    public native int   getDefaultMifareCLTRoute();
+
+    @Override
+    public native void doSetScreenState(int mScreenState);
 
     @Override
     public native void enableDiscovery();
@@ -148,11 +236,31 @@ public class NativeNfcManager implements DeviceHost {
     public native int[] doGetSecureElementList();
 
     @Override
-    public native void doSelectSecureElement();
+    public native void doSelectSecureElement(int seID);
 
     @Override
-    public native void doDeselectSecureElement();
+    public native void doDeselectSecureElement(int seID);
 
+    @Override
+    public native void doSetSEPowerOffState(int seID, boolean enable);
+
+    @Override
+    public native void setDefaultTechRoute(int seID, int tech_switchon, int tech_switchoff);
+
+    @Override
+    public native void setDefaultProtoRoute(int seID, int proto_switchon, int proto_switchoff);
+
+    @Override
+    public native int getChipVer();
+
+    @Override
+    public native int JCOSDownload();
+
+    @Override
+    public native void doSetVenConfigValue(int venconfig);
+
+    @Override
+    public native int GetDefaultSE();
 
     private native NativeLlcpConnectionlessSocket doCreateLlcpConnectionlessSocket(int nSap,
             String sn);
@@ -258,7 +366,8 @@ public class NativeNfcManager implements DeviceHost {
 
     @Override
     public boolean canMakeReadOnly(int ndefType) {
-        return (ndefType == Ndef.TYPE_1 || ndefType == Ndef.TYPE_2);
+        return (ndefType == Ndef.TYPE_1 || ndefType == Ndef.TYPE_2 ||
+                ndefType == Ndef.TYPE_MIFARE_CLASSIC);
     }
 
     @Override
@@ -281,7 +390,7 @@ public class NativeNfcManager implements DeviceHost {
                  * such a frame is supported. Extended length frames however
                  * are not supported.
                  */
-                return 261; // Will be automatically split in two frames on the RF layer
+                return 0xFEFF; // Will be automatically split in two frames on the RF layer
             case (TagTechnology.NFC_F):
                 return 252; // PN544 RF buffer = 255 bytes, subtract one for SoD, two for CRC
             default:
@@ -289,6 +398,8 @@ public class NativeNfcManager implements DeviceHost {
         }
 
     }
+    @Override
+    public native int setEmvCoPollProfile(boolean enable, int route);
 
     private native void doSetP2pInitiatorModes(int modes);
     @Override
@@ -304,8 +415,7 @@ public class NativeNfcManager implements DeviceHost {
 
     @Override
     public boolean getExtendedLengthApdusSupported() {
-        // TODO check BCM support
-        return false;
+        return true;
     }
 
     @Override
@@ -348,6 +458,24 @@ public class NativeNfcManager implements DeviceHost {
         return true;
     }
 
+    @Override
+    public native int doGetSecureElementTechList();
+
+    @Override
+    public native void doPrbsOn(int tech, int rate);
+
+    @Override
+    public native void doPrbsOff();
+
+    @Override
+    public native int SWPSelfTest(int ch);
+
+    @Override
+    public native int getFWVersion();
+
+    @Override
+    public native void doSetEEPROM(byte[] val);
+
     /**
      * Notifies Ndef Message (TODO: rename into notifyTargetDiscovered)
      */
@@ -365,8 +493,22 @@ public class NativeNfcManager implements DeviceHost {
     /**
      * Notifies transaction
      */
-    private void notifyTransactionListeners(byte[] aid) {
-        mListener.onCardEmulationAidSelected(aid);
+    private void notifyTransactionListeners(byte[] aid, byte[] data, int evtSrc) {
+        mListener.onCardEmulationAidSelected(aid,data,evtSrc);
+    }
+
+    /**
+     * Notifies transaction
+     */
+    private void notifyConnectivityListeners(int evtSrc) {
+        mListener.onConnectivityEvent(evtSrc);
+    }
+
+    /**
+     * Notifies transaction
+     */
+    private void notifyEmvcoMultiCardDetectedListeners() {
+        mListener.onEmvcoMultiCardDetectedEvent();
     }
 
     /**
@@ -396,6 +538,19 @@ public class NativeNfcManager implements DeviceHost {
 
     private void notifySeFieldDeactivated() {
         mListener.onRemoteFieldDeactivated();
+    }
+
+    /* Reader over SWP listeners*/
+    private void notifySWPReaderRequested(boolean istechA, boolean istechB) {
+        mListener.onSWPReaderRequestedEvent(istechA, istechB);
+    }
+
+    private void notifySWPReaderActivated() {
+        mListener.onSWPReaderActivatedEvent();
+    }
+
+    private void notifyonSWPReaderDeActivated() {
+        mListener.onSWPReaderDeActivatedEvent();
     }
 
     private void notifySeListenActivated() {
@@ -428,6 +583,10 @@ public class NativeNfcManager implements DeviceHost {
 
     private void notifyHostEmuDeactivated() {
         mListener.onHostCardEmulationDeactivated();
+    }
+
+    private void notifyAidRoutingTableFull() {
+        mListener.onAidRoutingTableFull();
     }
 
 }

@@ -48,9 +48,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
+import com.android.nfc.NfcService;
+
+import com.vzw.nfc.AidFilter;
+
 public class RegisteredServicesCache {
     static final String TAG = "RegisteredServicesCache";
-    static final boolean DEBUG = false;
+    static final boolean DEBUG = true;
 
     final Context mContext;
     final AtomicReference<BroadcastReceiver> mReceiver;
@@ -61,7 +65,7 @@ public class RegisteredServicesCache {
     // mUserServices holds the card emulation services that are running for each user
     final SparseArray<UserServices> mUserServices = new SparseArray<UserServices>();
     final Callback mCallback;
-
+    final NfcService mNfcService;
     public interface Callback {
         void onServicesUpdated(int userId, final List<ApduServiceInfo> services);
     };
@@ -86,7 +90,7 @@ public class RegisteredServicesCache {
     public RegisteredServicesCache(Context context, Callback callback) {
         mContext = context;
         mCallback = callback;
-
+        mNfcService = NfcService.getInstance();
         final BroadcastReceiver receiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {

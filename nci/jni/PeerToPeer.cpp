@@ -40,6 +40,9 @@ namespace android
 {
     extern void nativeNfcTag_registerNdefTypeHandler ();
     extern void nativeNfcTag_deregisterNdefTypeHandler ();
+    extern int getScreenState();
+    extern void startRfDiscovery(bool isStart);
+    extern bool isDiscoveryStarted();
 }
 
 
@@ -473,6 +476,7 @@ bool PeerToPeer::deregisterServer (tJNI_HANDLE jniHandle)
     tNFA_STATUS     nfaStat = NFA_STATUS_FAILED;
     sp<P2pServer>   pSrv = NULL;
 
+    bool isDiscStopped = false;
     mMutex.lock();
     if ((pSrv = findServerLocked (jniHandle)) == NULL)
     {
@@ -481,6 +485,18 @@ bool PeerToPeer::deregisterServer (tJNI_HANDLE jniHandle)
         return (false);
     }
     mMutex.unlock();
+    if(isDiscoveryStarted())
+    {
+        isDiscStopped = true;
+        startRfDiscovery(false);
+    }
+
+    //Check if discovery  is started
+    if(isDiscoveryStarted())
+    {
+
+        startRfDiscovery(false);
+    }
 
     {
         // Server does not call NFA_P2pDisconnect(), so unblock the accept()
@@ -495,6 +511,11 @@ bool PeerToPeer::deregisterServer (tJNI_HANDLE jniHandle)
     }
 
     removeServer (jniHandle);
+
+    if(isDiscStopped == true)
+    {
+        startRfDiscovery(true);
+    }
 
     ALOGD ("%s: exit", fn);
     return true;
@@ -535,7 +556,7 @@ bool PeerToPeer::createClient (tJNI_HANDLE jniHandle, UINT16 miu, UINT8 rw)
     }
     mMutex.unlock();
 
-    if (client == NULL)
+    if (client == NULL || i >=sMax)
     {
         ALOGE ("%s: fail", fn);
         return (false);

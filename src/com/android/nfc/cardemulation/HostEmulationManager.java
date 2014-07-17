@@ -44,13 +44,17 @@ import java.util.ArrayList;
 
 public class HostEmulationManager {
     static final String TAG = "HostEmulationManager";
-    static final boolean DBG = false;
+    static final boolean DBG = true;
 
     static final int STATE_IDLE = 0;
     static final int STATE_W4_SELECT = 1;
     static final int STATE_W4_SERVICE = 2;
     static final int STATE_W4_DEACTIVATE = 3;
     static final int STATE_XFER = 4;
+
+    static final int SCREEN_STATE_OFF = 1;
+    static final int SCREEN_STATE_ON_LOCKED = 2;
+    static final int SCREEN_STATE_ON_UNLOCKED = 3;
 
     /** Minimum AID lenth as per ISO7816 */
     static final int MINIMUM_AID_LENGTH = 5;
@@ -103,11 +107,14 @@ public class HostEmulationManager {
     int mState;
     byte[] mSelectApdu;
 
+    int mScreenState;
+
     public HostEmulationManager(Context context, RegisteredAidCache aidCache) {
         mContext = context;
         mLock = new Object();
         mAidCache = aidCache;
         mState = STATE_IDLE;
+        mScreenState = SCREEN_STATE_ON_UNLOCKED;
         mKeyguard = (KeyguardManager) context.getSystemService(Context.KEYGUARD_SERVICE);
         SettingsObserver observer = new SettingsObserver(mHandler);
         context.getContentResolver().registerContentObserver(
@@ -135,6 +142,10 @@ public class HostEmulationManager {
         }
     }
 
+    public void setScreenState(int state) {
+        mScreenState = state;
+    }
+
     public void notifyHostEmulationActivated() {
         Log.d(TAG, "notifyHostEmulationActivated");
         synchronized (mLock) {
@@ -155,12 +166,17 @@ public class HostEmulationManager {
         Log.d(TAG, "notifyHostEmulationData");
         String selectAid = findSelectAid(data);
         ComponentName resolvedService = null;
+        boolean isPartialMatched =false;
         synchronized (mLock) {
             if (mState == STATE_IDLE) {
                 Log.e(TAG, "Got data in idle state.");
                 return;
             } else if (mState == STATE_W4_DEACTIVATE) {
                 Log.e(TAG, "Dropping APDU in STATE_W4_DECTIVATE");
+                return;
+            }
+            if (mScreenState == SCREEN_STATE_OFF) {
+                NfcService.getInstance().sendData(AID_NOT_FOUND);
                 return;
             }
             if (selectAid != null) {
@@ -170,22 +186,27 @@ public class HostEmulationManager {
                 }
                 AidResolveInfo resolveInfo = mAidCache.resolveAidPrefix(selectAid);
                 if (resolveInfo == null || resolveInfo.services.size() == 0) {
-                    // Tell the remote we don't handle this AID
-                    NfcService.getInstance().sendData(AID_NOT_FOUND);
-                    return;
-                }
-                mLastSelectedAid = resolveInfo.aid;
-                if (resolveInfo.defaultService != null) {
-                    // Resolve to default
-                    // Check if resolvedService requires unlock
-                    if (resolveInfo.defaultService.requiresUnlock() &&
-                            mKeyguard.isKeyguardLocked() && mKeyguard.isKeyguardSecure()) {
-                        String category = mAidCache.getCategoryForAid(resolveInfo.aid);
-                        // Just ignore all future APDUs until next tap
-                        mState = STATE_W4_DEACTIVATE;
-                        launchTapAgain(resolveInfo.defaultService, category);
+                    resolveInfo = mAidCache.resolveAidPartialMatch(selectAid);
+                    if (resolveInfo == null || resolveInfo.services.size() == 0) {
+                        // Tell the remote we don't handle this AID
+                        NfcService.getInstance().sendData(AID_NOT_FOUND);
                         return;
                     }
+                    isPartialMatched = true;
+                }
+                mLastSelectedAid = resolveInfo.aid;
+                if (!isPartialMatched) {
+                    if (resolveInfo.defaultService != null) {
+                        // Resolve to default
+                        // Check if resolvedService requires unlock
+                        if (resolveInfo.defaultService.requiresUnlock()
+                                && mKeyguard.isKeyguardLocked() && mKeyguard.isKeyguardSecure()) {
+                            String category = mAidCache.getCategoryForAid(resolveInfo.aid);
+                            // Just ignore all future APDUs until next tap
+                            mState = STATE_W4_DEACTIVATE;
+                            launchTapAgain(resolveInfo.defaultService, category);
+                            return;
+                        }
                     // In no circumstance should this be an OffHostService -
                     // we should never get this AID on the host in the first place
                     if (!resolveInfo.defaultService.isOnHost()) {
@@ -200,6 +221,7 @@ public class HostEmulationManager {
                         if (mActiveServiceName.equals(service.getComponent())) {
                             resolvedService = mActiveServiceName;
                             break;
+                            }
                         }
                     }
                 }
@@ -208,12 +230,22 @@ public class HostEmulationManager {
                     // Ask the user to confirm.
                     // Get corresponding category
                     String category = mAidCache.getCategoryForAid(resolveInfo.aid);
+                    ArrayList<ApduServiceInfo> services = (ArrayList<ApduServiceInfo>) resolveInfo.services;
                     // Just ignore all future APDUs until we resolve to only one
                     mState = STATE_W4_DEACTIVATE;
-                    launchResolver((ArrayList<ApduServiceInfo>)resolveInfo.services, null, category);
+                    if (isPartialMatched) {
+                        services = new ArrayList<ApduServiceInfo>(resolveInfo.services);
+                        for (ApduServiceInfo service : resolveInfo.services) {
+                            if (resolveInfo.aid.length() > mLastSelectedAid.length()) {
+                                services.remove(service);
+                            }
+                        }
+                    }
+                    launchResolver(services, null, category);
                     return;
                 }
             }
+
             switch (mState) {
             case STATE_W4_SELECT:
                 if (selectAid != null) {
